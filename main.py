@@ -4,6 +4,7 @@ import numpy as np
 import plotter
 import saver
 from pathlib import Path
+from pipython import GCSDevice, pitools
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -94,6 +95,21 @@ if __name__ == "__main__":
         help="Select Mode",
     )
 
+    parser.add_argument(
+        "--positions",
+        type=float,
+        nargs="+",
+        default=[0.1, 0.2, 0.3, 0.4, 0.5],
+        help="Absolute stage positions in mm"
+    )
+
+    parser.add_argument(
+        "--stage",
+        type=int,
+        default="3",
+        help="Port of the PI stage controller"
+    )
+
     args = parser.parse_args()
 
     f_min = args.freq_from
@@ -107,12 +123,13 @@ if __name__ == "__main__":
     # Generate log-spaced frequencies
     frequencies = np.logspace(np.log10(f_min), np.log10(f_max), num=total_points)
 
+    # Initialize meter
     meter = Meter(port=args.port, baudrate=args.baudrate)
     meter.connect()
 
-    # print(f"Connected to {args.port} at {args.baudrate} baud.")
-    print(f"Running sweep across {frequencies} frequencies...")
+    print(f"Connected to {args.port} at {args.baudrate} baud.")
 
+    # Select measurement function
     if args.mode == "STA":
         if len(args.bias) > 1:
             fn = meter.sweep_short_time_avg_multi_bias
@@ -120,34 +137,132 @@ if __name__ == "__main__":
         else:
             fn = meter.sweep_short_time_avg
             bias = args.bias[0]
+
     elif args.mode == "LTA":
+        if len(args.bias) != 1:
+            raise ValueError("LTA currently supports one bias value.")
+
         fn = meter.sweep_long_time_avg
         bias = args.bias[0]
 
-    mag, phase, timing = fn(
-        frequencies=frequencies,
-        level=args.level,
-        bias=bias,
-        average=args.average,
-    )
+    # Connect to stage
+    with GCSDevice("C-863") as stage:
 
-    saver.save_to_csv(
-        frequencies,
-        mag,
-        phase,
-        args.bias,
-        args.mode,
-        args.level,
-        args.average,
-        timing=timing,
-        outdir=Path.cwd() / "out" / "data" if args.save else None,
-        title=args.save,
-    )
+        stage.ConnectRS232(comport=args.stage, baudrate=115200)
+        axis = stage.axes[0]
 
-    plotter.make_figure(
-        frequencies, mag, phase, args.bias, outdir=Path.cwd() / "out" / "img" if len(args.save) > 0 else None
-    )
+        print(f"Connected to stage: {stage.qIDN().strip()}")
 
-    print("\n--- Sweep Complete ---")
-    print("Magnitude:\n", mag)
-    print("Phase:\n", phase)
+        # Stage must already be referenced before MOV commands.
+        # If not, reference it using the appropriate PI procedure.
+
+        # Loop over stage positions
+        for target in args.positions:
+
+            print(f"\n--- Moving stage to {target:.4f} mm ---")
+
+            # Move to absolute position
+            stage.MOV(axis, target)
+
+            # Wait until target reached
+            pitools.waitontarget(stage, axes=axis)
+
+            # Read actual position
+            position = stage.qPOS(axis)[axis]
+
+            print(f"Stage stopped at {position:.6f} mm")
+
+            # Perform EIS measurement
+            print(f"Running sweep at {position:.6f} mm...")
+
+            mag, phase, timing = fn(
+                frequencies=frequencies,
+                level=args.level,
+                bias=bias,
+                average=args.average,
+            )
+
+            # Save data
+            saver.save_to_csv(
+                frequencies,
+                mag,
+                phase,
+                args.bias,
+                args.mode,
+                args.level,
+                args.average,
+                timing=timing,
+                position=position,
+                outdir=(
+                    Path.cwd() / "out" / "data"
+                    if args.save else None
+                ),
+                title=f"{args.save}_pos_{position:.4f}mm",
+            )
+
+            # Save plot
+            plotter.make_figure(
+                frequencies,
+                mag,
+                phase,
+                args.bias,
+                outdir=(
+                    Path.cwd() / "out" / "img"
+                    if args.save else None
+                ),
+            )
+
+            print(f"Completed measurement at {position:.6f} mm")
+
+    print("\n--- All Position Sweeps Complete ---")
+
+    ## Move stage
+
+
+
+    # EIS measurement
+
+    # meter = Meter(port=args.port, baudrate=args.baudrate)
+    # meter.connect()
+
+    # # print(f"Connected to {args.port} at {args.baudrate} baud.")
+    # print(f"Running sweep across {frequencies} frequencies...")
+
+    # if args.mode == "STA":
+    #     if len(args.bias) > 1:
+    #         fn = meter.sweep_short_time_avg_multi_bias
+    #         bias = args.bias
+    #     else:
+    #         fn = meter.sweep_short_time_avg
+    #         bias = args.bias[0]
+    # elif args.mode == "LTA":
+    #     fn = meter.sweep_long_time_avg
+    #     bias = args.bias[0]
+
+    # mag, phase, timing = fn(
+    #     frequencies=frequencies,
+    #     level=args.level,
+    #     bias=bias,
+    #     average=args.average,
+    # )
+
+    # saver.save_to_csv(
+    #     frequencies,
+    #     mag,
+    #     phase,
+    #     args.bias,
+    #     args.mode,
+    #     args.level,
+    #     args.average,
+    #     timing=timing,
+    #     outdir=Path.cwd() / "out" / "data" if args.save else None,
+    #     title=args.save,
+    # )
+
+    # plotter.make_figure(
+    #     frequencies, mag, phase, args.bias, outdir=Path.cwd() / "out" / "img" if len(args.save) > 0 else None
+    # )
+
+    # print("\n--- Sweep Complete ---")
+    # print("Magnitude:\n", mag)
+    # print("Phase:\n", phase)
