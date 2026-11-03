@@ -52,8 +52,8 @@ def save_to_csv(
             "Sample Index",
             "Magnitude",
             "Phase (deg)",
-            "Trigger Time (ns)",
-            "Arrival Time (ns)",
+            "Trigger Datetime",
+            "Arrival Datetime",
             "Duration (ms)",
             "Position (mm)",
         ])
@@ -80,12 +80,22 @@ def save_to_csv(
 
                 for s_idx in range(num_samples):
 
-                    # Timestamps from time.perf_counter_ns()
-                    t_trigger = int(t_matrix[f_idx, s_idx, 0])
-                    t_arrival = int(t_matrix[f_idx, s_idx, 1])
+                    # Datetime strings from meter.py
+                    t_trigger = str(t_matrix[f_idx, s_idx, 0])
+                    t_arrival = str(t_matrix[f_idx, s_idx, 1])
 
-                    # Convert nanoseconds to milliseconds
-                    duration_ms = (t_arrival - t_trigger) / 1e6
+                    # Convert ISO datetime strings to datetime objects
+                    trigger_dt = datetime.datetime.fromisoformat(
+                        t_trigger
+                    )
+                    arrival_dt = datetime.datetime.fromisoformat(
+                        t_arrival
+                    )
+
+                    # Calculate measurement duration in milliseconds
+                    duration_ms = (
+                        arrival_dt - trigger_dt
+                    ).total_seconds() * 1000
 
                     writer.writerow([
                         mode,
