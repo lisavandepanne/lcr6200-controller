@@ -17,6 +17,7 @@ def save_to_csv(
     title=None,
     timing=None,
     position=None,
+    filename=None,
 ):
     if outdir is None:
         return
@@ -27,36 +28,45 @@ def save_to_csv(
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    filename = (
-        datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-        + "_sweep"
-        + ("" if title is None else f"_{title}")
-        + ".csv"
-    )
+    # Use a fixed filename for the entire experiment
+    if filename is None:
+        filename = (
+            datetime.datetime.now().strftime("%y%m%d-%H%M%S")
+            + "_sweep"
+            + ("" if title is None else f"_{title}")
+            + ".csv"
+        )
+
     filepath = outdir / filename
+
+    # Check whether file already exists
+    file_exists = filepath.exists()
 
     # Support single-bias and multi-bias measurements
     mag_list = mag if len(bias_list) > 1 else [mag]
     phase_list = phase if len(bias_list) > 1 else [phase]
     timing_list = timing if len(bias_list) > 1 else [timing]
 
-    with open(filepath, mode="w", newline="") as f:
+    # Append measurements to existing file
+    with open(filepath, mode="a", newline="") as f:
         writer = csv.writer(f)
 
-        writer.writerow([
-            "Mode",
-            "Level (V)",
-            "Average",
-            "Bias (V)",
-            "Frequency (Hz)",
-            "Sample Index",
-            "Magnitude",
-            "Phase (deg)",
-            "Trigger Datetime",
-            "Arrival Datetime",
-            "Duration (ms)",
-            "Position (mm)",
-        ])
+        # Write header only for new files
+        if not file_exists or filepath.stat().st_size == 0:
+            writer.writerow([
+                "Mode",
+                "Level (V)",
+                "Average",
+                "Bias (V)",
+                "Frequency (Hz)",
+                "Sample Index",
+                "Magnitude",
+                "Phase (deg)",
+                "Trigger Datetime",
+                "Arrival Datetime",
+                "Duration (ms)",
+                "Position (mm)",
+            ])
 
         for b_idx, b_val in enumerate(bias_list):
             m_matrix = np.asarray(mag_list[b_idx])
@@ -84,7 +94,7 @@ def save_to_csv(
                     t_trigger = str(t_matrix[f_idx, s_idx, 0])
                     t_arrival = str(t_matrix[f_idx, s_idx, 1])
 
-                    # Convert ISO datetime strings to datetime objects
+                    # Convert timestamps to datetime objects
                     trigger_dt = datetime.datetime.fromisoformat(
                         t_trigger
                     )
@@ -92,7 +102,7 @@ def save_to_csv(
                         t_arrival
                     )
 
-                    # Calculate measurement duration in milliseconds
+                    # Calculate duration in milliseconds
                     duration_ms = (
                         arrival_dt - trigger_dt
                     ).total_seconds() * 1000
@@ -112,4 +122,4 @@ def save_to_csv(
                         position,
                     ])
 
-    print(f"CSV data successfully saved to: {filepath}")
+    print(f"Data appended to: {filepath}")
