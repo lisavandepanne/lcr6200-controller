@@ -16,6 +16,7 @@ def save_to_csv(
     outdir=None,
     title=None,
     timing=None,
+    position=None,
 ):
     if outdir is None:
         return
@@ -51,9 +52,10 @@ def save_to_csv(
             "Sample Index",
             "Magnitude",
             "Phase (deg)",
-            "Trigger Datetime",
-            "Arrival Datetime",
+            "Trigger Time (ns)",
+            "Arrival Time (ns)",
             "Duration (ms)",
+            "Position (mm)",
         ])
 
         for b_idx, b_val in enumerate(bias_list):
@@ -77,20 +79,13 @@ def save_to_csv(
                 freq = frequencies[f_idx]
 
                 for s_idx in range(num_samples):
-                    t_trigger = str(t_matrix[f_idx, s_idx, 0])
-                    t_arrival = str(t_matrix[f_idx, s_idx, 1])
 
-                    # Calculate duration from datetime strings
-                    trigger_dt = datetime.datetime.fromisoformat(
-                        t_trigger
-                    )
-                    arrival_dt = datetime.datetime.fromisoformat(
-                        t_arrival
-                    )
+                    # Timestamps from time.perf_counter_ns()
+                    t_trigger = int(t_matrix[f_idx, s_idx, 0])
+                    t_arrival = int(t_matrix[f_idx, s_idx, 1])
 
-                    duration_ms = (
-                        arrival_dt - trigger_dt
-                    ).total_seconds() * 1000
+                    # Convert nanoseconds to milliseconds
+                    duration_ms = (t_arrival - t_trigger) / 1e6
 
                     writer.writerow([
                         mode,
@@ -104,6 +99,7 @@ def save_to_csv(
                         t_trigger,
                         t_arrival,
                         duration_ms,
+                        position,
                     ])
 
     print(f"CSV data successfully saved to: {filepath}")
