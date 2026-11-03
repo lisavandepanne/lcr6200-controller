@@ -25,34 +25,39 @@ def save_to_csv(
     if timing is None:
         raise ValueError("Timing data is required to save timestamps.")
 
+    if filename is None:
+        raise ValueError(
+            "A filename must be provided so all positions "
+            "are saved to the same CSV file."
+        )
+
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    # Use a fixed filename for the entire experiment
-    if filename is None:
-        filename = (
-            datetime.datetime.now().strftime("%y%m%d-%H%M%S")
-            + "_sweep"
-            + ("" if title is None else f"_{title}")
-            + ".csv"
-        )
+    # Ensure the filename has a .csv extension
+    filename = Path(filename).name
+    if not filename.lower().endswith(".csv"):
+        filename += ".csv"
 
     filepath = outdir / filename
 
-    # Check whether file already exists
-    file_exists = filepath.exists()
+    # Check whether the CSV already contains data
+    write_header = (
+        not filepath.exists()
+        or filepath.stat().st_size == 0
+    )
 
     # Support single-bias and multi-bias measurements
     mag_list = mag if len(bias_list) > 1 else [mag]
     phase_list = phase if len(bias_list) > 1 else [phase]
     timing_list = timing if len(bias_list) > 1 else [timing]
 
-    # Append measurements to existing file
+    # Append measurements from each stage position
     with open(filepath, mode="a", newline="") as f:
         writer = csv.writer(f)
 
-        # Write header only for new files
-        if not file_exists or filepath.stat().st_size == 0:
+        # Write header only once
+        if write_header:
             writer.writerow([
                 "Mode",
                 "Level (V)",
@@ -82,19 +87,27 @@ def save_to_csv(
 
             if t_matrix.shape != (num_freqs, num_samples, 2):
                 raise ValueError(
-                    "Timing must have shape (frequencies, samples, 2)."
+                    "Timing must have shape "
+                    "(frequencies, samples, 2)."
+                )
+
+            if len(frequencies) != num_freqs:
+                raise ValueError(
+                    "Frequency count does not match magnitude."
                 )
 
             for f_idx in range(num_freqs):
                 freq = frequencies[f_idx]
 
                 for s_idx in range(num_samples):
+                    # ISO datetime strings from meter.py
+                    t_trigger = str(
+                        t_matrix[f_idx, s_idx, 0]
+                    )
+                    t_arrival = str(
+                        t_matrix[f_idx, s_idx, 1]
+                    )
 
-                    # Datetime strings from meter.py
-                    t_trigger = str(t_matrix[f_idx, s_idx, 0])
-                    t_arrival = str(t_matrix[f_idx, s_idx, 1])
-
-                    # Convert timestamps to datetime objects
                     trigger_dt = datetime.datetime.fromisoformat(
                         t_trigger
                     )
@@ -102,7 +115,7 @@ def save_to_csv(
                         t_arrival
                     )
 
-                    # Calculate duration in milliseconds
+                    # Calculate measurement duration in ms
                     duration_ms = (
                         arrival_dt - trigger_dt
                     ).total_seconds() * 1000
@@ -122,4 +135,4 @@ def save_to_csv(
                         position,
                     ])
 
-    print(f"Data appended to: {filepath}")
+    print(f"Data saved to: {filepath}")
