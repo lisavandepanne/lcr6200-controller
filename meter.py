@@ -1,20 +1,27 @@
+
 import serial
 import numpy as np
 import time
 from datetime import datetime
 
-SLOW_SCAN_SPEED_FREQUENCY = [10, 20, 100, 1000, 2000, 10000, 100000, 300000] # Hz
-SLOW_SCAN_SPEED_TIME = [1600, 800, 483, 342, 336, 332, 332, 332] # ms
+SLOW_SCAN_SPEED_FREQUENCY = [10, 20, 100, 1000, 2000, 10000, 100000, 300000]  # Hz
+SLOW_SCAN_SPEED_TIME = [1600, 800, 483, 342, 336, 332, 332, 332]  # ms
+
 
 class Meter:
     conn: serial.Serial
 
-    def __init__(self, port, baudrate = 115200):
+    def __init__(self, port, baudrate=115200):
         self.port = port
         self.baudrate = baudrate
+        self.conn = None
 
     def connect(self):
-        self.conn = serial.Serial(self.port, self.baudrate, timeout=1.5 * max(SLOW_SCAN_SPEED_FREQUENCY) / 1000)
+        self.conn = serial.Serial(
+            self.port,
+            self.baudrate,
+            timeout=1.5 * max(SLOW_SCAN_SPEED_TIME) / 1000
+        )
         time.sleep(0.1)
 
     def set_meas_page(self):
@@ -22,22 +29,22 @@ class Meter:
         time.sleep(1)
 
     def set_function_impedance(self):
-        self.conn.write(b'FUNC Z-thd\n')
+        self.conn.write(b"FUNC Z-thd\n")
         time.sleep(0.1)
 
-    def set_bias_voltage(self, v = 0):
+    def set_bias_voltage(self, v=0):
         self.bias = v
-        self.conn.write(f'BIAS {v}\n'.encode())
+        self.conn.write(f"BIAS {v}\n".encode())
         time.sleep(0.1)
 
-    def set_frequency(self, f = 1000):
+    def set_frequency(self, f=1000):
         self.frequency = f
-        self.conn.write(f'FREQ {f}\n'.encode())
+        self.conn.write(f"FREQ {f}\n".encode())
         time.sleep(0.1)
 
-    def set_stim_voltage(self, v = 0.05):
+    def set_stim_voltage(self, v=0.05):
         self.stim = v
-        self.conn.write(f'LEV:VOLT {v}\n'.encode())
+        self.conn.write(f"LEV:VOLT {v}\n".encode())
         time.sleep(0.1)
 
     def set_average(self, samples):
@@ -54,20 +61,25 @@ class Meter:
         time.sleep(0.1)
 
     def trigger_fetch(self):
+        # Record trigger datetime
         t_trigger = datetime.now().isoformat(timespec="microseconds")
+
+        # Trigger measurement
         self.conn.write(b"*TRG\n")
-        raw = self.conn.readline()  
+
+        # Wait for measurement response
+        raw = self.conn.readline()
+
+        # Record arrival datetime
         t_arrival = datetime.now().isoformat(timespec="microseconds")
 
         if not raw:
             raise TimeoutError("No response from LCR-6200")
 
         return raw, t_trigger, t_arrival
-        
-        # undocumented, but TRIG:IMM returns an empty line when the measurement is complete; i.e. we can immediately perform a fetch after a trigger because self.conn.readline will block the program until the trigger is complete
 
-    def decode_fetch(self, bytes: bytes):
-        mag, phase, _, _, _ = bytes.decode("utf-8").split(",")
+    def decode_fetch(self, data: bytes):
+        mag, phase, _, _, _ = data.decode("utf-8").split(",")
         print(f"\t{mag}\t{phase}")
         return float(mag.strip()), float(phase.strip())
 
@@ -79,7 +91,11 @@ class Meter:
         self.set_average(average)
         self.set_slow_scan_speed()
         self.set_trigger()
-        print(f"Initialized System Vdc={bias}; Vac={level}; Avg={average}.")
+
+        print(
+            f"Initialized System Vdc={bias}; "
+            f"Vac={level}; Avg={average}."
+        )
 
     def sweep_short_time_avg(self, frequencies, level, bias, average):
         self.initialize_system(level, bias, average)
@@ -112,10 +128,16 @@ class Meter:
                 results_phase[i].append(phase)
                 results_timing[i].append([t_trigger, t_arrival])
 
+                # Calculate duration in milliseconds
+                duration_ms = (
+                    datetime.fromisoformat(t_arrival)
+                    - datetime.fromisoformat(t_trigger)
+                ).total_seconds() * 1000
+
                 print(
-                    f"Trigger: {t_trigger} ns | "
-                    f"Arrival: {t_arrival} ns | "
-                    f"Duration: {(t_arrival - t_trigger) / 1e6:.3f} ms"
+                    f"Trigger: {t_trigger} | "
+                    f"Arrival: {t_arrival} | "
+                    f"Duration: {duration_ms:.3f} ms"
                 )
 
                 time.sleep(0.05)
@@ -125,7 +147,6 @@ class Meter:
             np.array(results_phase),
             np.array(results_timing),
         )
-
 
     def sweep_long_time_avg(self, frequencies, level, bias, average):
         self.initialize_system(level, bias, average)
@@ -158,10 +179,16 @@ class Meter:
                 results_phase[i].append(phase)
                 results_timing[i].append([t_trigger, t_arrival])
 
+                # Calculate duration in milliseconds
+                duration_ms = (
+                    datetime.fromisoformat(t_arrival)
+                    - datetime.fromisoformat(t_trigger)
+                ).total_seconds() * 1000
+
                 print(
-                    f"Trigger: {t_trigger} ns | "
-                    f"Arrival: {t_arrival} ns | "
-                    f"Duration: {(t_arrival - t_trigger) / 1e6:.3f} ms"
+                    f"Trigger: {t_trigger} | "
+                    f"Arrival: {t_arrival} | "
+                    f"Duration: {duration_ms:.3f} ms"
                 )
 
                 time.sleep(0.05)
@@ -180,18 +207,27 @@ class Meter:
 
         return magnitude, phase, timing
 
-
-        return np.array(results_magnitude).T, np.array(results_phase).T
-
-    def sweep_short_time_avg_multi_bias(self, frequencies, level, bias, average):
+    def sweep_short_time_avg_multi_bias(
+        self, frequencies, level, bias, average
+    ):
         res_mag = []
         res_phase = []
-        for b in bias:
-            result = self.sweep_short_time_avg(frequencies, level, b, average)
-            res_mag.append(result[0])
-            res_phase.append(result[1])
+        res_timing = []
 
-        return res_mag, res_phase
+        for b in bias:
+            mag, phase, timing = self.sweep_short_time_avg(
+                frequencies, level, b, average
+            )
+
+            res_mag.append(mag)
+            res_phase.append(phase)
+            res_timing.append(timing)
+
+        return res_mag, res_phase, res_timing
+
+    def close(self):
+        if self.conn is not None and self.conn.is_open:
+            self.conn.close()
 
     def __del__(self):
-        self.conn.close()
+        self.close()
