@@ -224,3 +224,4 @@ __pycache__/
 *.pyc
 out/
 .env
+.venv/
