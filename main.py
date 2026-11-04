@@ -210,18 +210,18 @@ if __name__ == "__main__":
                 filename=experiment_filename,
             )
 
-            # Save plot
-            plotter.make_figure(
-                frequencies,
-                mag,
-                phase,
-                args.bias,
-                outdir=(
-                    Path.cwd() / "out" / "img"
-                    if args.save else None
-                ),
-                position=position
-            )
+            # # Save plot
+            # plotter.make_figure(
+            #     frequencies,
+            #     mag,
+            #     phase,
+            #     args.bias,
+            #     outdir=(
+            #         Path.cwd() / "out" / "img"
+            #         if args.save else None
+            #     ),
+            #     position=position
+            # )
 
             print(f"Completed measurement at {position:.6f} mm")
 
