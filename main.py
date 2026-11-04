@@ -5,6 +5,7 @@ import plotter
 import saver
 from pathlib import Path
 from pipython import GCSDevice, pitools
+from datetime import datetime
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -99,7 +100,7 @@ if __name__ == "__main__":
         "--positions",
         type=float,
         nargs="+",
-        default=[0.1, 0.2, 0.3, 0.4, 0.5],
+        default=[0.1, 0.2],
         help="Absolute stage positions in mm"
     )
 
@@ -111,6 +112,8 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+
+    experiment_filename = (datetime.now().strftime("%y%m%d_-%H%M%S")+f"_sweep_{args.save}.csv")
 
     f_min = args.freq_from
     f_max = args.to
@@ -145,13 +148,20 @@ if __name__ == "__main__":
         fn = meter.sweep_long_time_avg
         bias = args.bias[0]
 
+    CONTROLLERNAME = 'C-863'  # 'C-884' will also work
+    STAGES = ['M-112.1DG']
+    REFMODES = ['FNL']
+
     # Connect to stage
-    with GCSDevice("C-863") as stage:
+    with GCSDevice(CONTROLLERNAME) as stage:
 
         stage.ConnectRS232(comport=args.stage, baudrate=115200)
         axis = stage.axes[0]
 
         print(f"Connected to stage: {stage.qIDN().strip()}")
+
+        print('initialize connected stages...')
+        pitools.startup(stage, stages=STAGES, refmodes=REFMODES)
 
         # Stage must already be referenced before MOV commands.
         # If not, reference it using the appropriate PI procedure.
@@ -197,7 +207,7 @@ if __name__ == "__main__":
                     Path.cwd() / "out" / "data"
                     if args.save else None
                 ),
-                title=f"{args.save}_pos_{position:.4f}mm",
+                filename=experiment_filename,
             )
 
             # Save plot
@@ -210,6 +220,7 @@ if __name__ == "__main__":
                     Path.cwd() / "out" / "img"
                     if args.save else None
                 ),
+                position=position
             )
 
             print(f"Completed measurement at {position:.6f} mm")
