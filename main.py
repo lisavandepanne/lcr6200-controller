@@ -113,6 +113,17 @@ if __name__ == "__main__":
         help="Port of the PI stage controller"
     )
 
+    # ==========================================================
+    # PLOTTING OPTION
+    # ==========================================================
+
+    parser.add_argument(
+        "--plot",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Enable or disable saving plots (default: disabled)"
+    )
+
     args = parser.parse_args()
 
     # ==========================================================
@@ -324,18 +335,28 @@ if __name__ == "__main__":
             # OPTIONAL: SAVE PLOTS
             # ==================================================
 
-            # Uncomment to save plots in the experiment folder.
-            #
-            # if experiment_dir is not None:
-            #
-            #     plotter.make_figure(
-            #         frequencies,
-            #         mag,
-            #         phase,
-            #         args.bias,
-            #         outdir=experiment_dir,
-            #         position=position
-            #     )
+            if args.plot:
+
+                if experiment_dir is not None:
+
+                    plotter.make_figure(
+                        frequencies,
+                        mag,
+                        phase,
+                        args.bias,
+                        outdir=experiment_dir,
+                        position=position
+                    )
+
+                    print(
+                        f"Plot generated for position {position:.6f} mm"
+                    )
+
+                else:
+                    print(
+                        "Plotting requested, but no experiment folder "
+                        "exists. Use --save to enable plot saving."
+                    )
 
             print(
                 f"Completed measurement at {position:.6f} mm"
