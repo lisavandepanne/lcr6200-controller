@@ -142,6 +142,7 @@ dependencies = [
     { name = "numpy" },
     { name = "packaging" },
     { name = "pillow" },
+    { name = "pipython" },
     { name = "pyparsing" },
     { name = "pyserial" },
     { name = "python-dateutil" },
@@ -159,6 +160,7 @@ requires-dist = [
     { name = "numpy", specifier = "==2.5.4" },
     { name = "packaging", specifier = "==26.3" },
     { name = "pillow", specifier = "==13.0.0" },
+    { name = "pipython", specifier = ">=2.13.0.2" },
     { name = "pyparsing", specifier = "==3.3.3" },
     { name = "pyserial", specifier = "==3.5" },
     { name = "python-dateutil", specifier = "==3.0.0" },
@@ -446,6 +448,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pipython"
+version = "2.13.0.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyserial" },
+    { name = "pyusb" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ba/6b/41da44d4d8173db5b09a43d87eeb8bfe6e50e19f39611a757becdb447c5c/pipython-2.13.0.2.tar.gz", hash = "sha256:916120591c323cfd2850996419687d8bdc11dd762bfc0c29ccad96cbeb9839d8", size = 1222572, upload-time = "2026-07-15T08:15:28.501Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/22/5f/0d7c58109075e546ab0fa376af1a9009b866561ed159a2f1e01ba6de94c5/pipython-2.13.0.2-py3-none-any.whl", hash = "sha256:5f0e671691af0bfad25261fe406ed847b6f4e521addc7eb6b4b17f266b813d06", size = 516584, upload-time = "2026-07-15T08:15:26.438Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -474,6 +489,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0e/df/f15f80383f152452d8985b36d95cb8751f901a3e0ff4cd27f7e118f168e2/python_dateutil-3.0.0.tar.gz", hash = "sha256:7ebcb3c29a92f3ceafe79a7a48a5c45677e9e004bbeec5742ac0bbb00560b7a2", size = 271066, upload-time = "2026-10-21T23:41:45.075Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5a/17/cebee01d1c0c1441174cf0456ddc91b280d79acb65340c05e41d77866ee8/python_dateutil-3.0.0-py2.py3-none-any.whl", hash = "sha256:3c79630202e4152c6add678446984236efe4f57e84d8e892aab0637bab82e9fd", size = 94659, upload-time = "2026-10-21T23:41:43.431Z" },
+]
+
+[[package]]
+name = "pyusb"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/00/6b/ce3727395e52b7b76dfcf0c665e37d223b680b9becc60710d4bc08b7b7cb/pyusb-1.3.1.tar.gz", hash = "sha256:3af070b607467c1c164f49d5b0caabe8ac78dbed9298d703a8dbf9df4052d17e", size = 77281, upload-time = "2025-01-08T23:45:01.866Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/28/b8/27e6312e86408a44fe16bd28ee12dd98608b39f7e7e57884a24e8f29b573/pyusb-1.3.1-py3-none-any.whl", hash = "sha256:bf9b754557af4717fe80c2b07cc2b923a9151f5c08d17bdb5345dac09d6a0430", size = 58465, upload-time = "2025-01-08T23:45:00.029Z" },
 ]
 
 [[package]]
