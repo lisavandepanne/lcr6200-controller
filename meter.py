@@ -113,30 +113,11 @@ class Meter:
 
             self.set_frequency(frequency)
             print(f"Set frequency to {frequency}.")
-        #debug
-        self.set_frequency(frequency)
-        print(f"Set frequency to {frequency}.")
-
-        for j in range(2):
-            print(f"Reset trigger {j + 1}: sending")
-            raw = self.trigger_fetch()
-            print(f"Reset trigger {j + 1}: received {raw!r}")
-            time.sleep(0.5)
-
-        for j in range(self.average):
-            print(f"Measurement trigger {j + 1}: sending")
-            raw = self.trigger_fetch()
-            print(f"Measurement trigger {j + 1}: received {raw!r}")
-
-            data = self.decode_fetch(raw)
-            results_magnitude[i].append(data[0])
-            results_phase[i].append(data[1])
-            time.sleep(0.05)
-        #debug    
+       
             # Trigger twice to reset the value
-            # for _ in range(2):
-            #     self.trigger_fetch()
-            #     time.sleep(0.5)
+            for _ in range(2):
+                self.trigger_fetch()
+                time.sleep(0.5)
 
             # Perform measurements and record timestamps
             for _ in range(self.average):
