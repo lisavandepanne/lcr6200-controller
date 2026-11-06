@@ -287,6 +287,17 @@ if __name__ == "__main__":
                 axes=axis
             )
 
+            # debugging
+            print("Checking LCR communication after stage movement...")
+
+            meter.conn.reset_input_buffer()
+            meter.conn.write(b"*IDN?\n")
+            meter.conn.flush()
+
+            response = meter.conn.readline()
+            print("LCR response:", repr(response))
+            # debugging
+
             # Read actual position
             position = stage.qPOS(axis)[axis]
 
