@@ -1,87 +1,125 @@
+"""Robust replacement for meter.py used by combined_sweep_robust.py.
 
+IMPORTANT: Assumes the instrument responds to *TRG with a five-field CSV line,
+as in the original implementation. Confirm against the instrument manual.
+"""
+import time
+import logging
 import serial
 import numpy as np
-import time
-from datetime import datetime
 
-SLOW_SCAN_SPEED_FREQUENCY = [10, 20, 100, 1000, 2000, 10000, 100000, 300000]  # Hz
-SLOW_SCAN_SPEED_TIME = [1600, 800, 483, 342, 336, 332, 332, 332]  # ms
+LOG = logging.getLogger(__name__)
+
+
+class MeterCommunicationError(RuntimeError):
+    pass
 
 
 class Meter:
-    conn: serial.Serial
-
-    def __init__(self, port, baudrate=115200):
+    def __init__(self, port, baudrate=115200, timeout=8.0):
         self.port = port
         self.baudrate = baudrate
+        self.timeout = timeout
         self.conn = None
+        self.average = 1
 
     def connect(self):
-        self.conn = serial.Serial(
-            self.port,
-            self.baudrate,
-            timeout=1.5 * max(SLOW_SCAN_SPEED_TIME) / 1000
-        )
-        time.sleep(0.1)
+        self.close()
+        self.conn = serial.Serial(self.port, self.baudrate, timeout=self.timeout,
+                                  write_timeout=3.0)
+        time.sleep(0.2)
+        LOG.info('Meter port opened: %s', self.port)
+
+    def close(self):
+        conn = self.conn
+        self.conn = None
+        if conn is not None and conn.is_open:
+            conn.close()
+
+    disconnect = close
+
+    def __enter__(self):
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def _send(self, command, delay=0.1):
+        if self.conn is None or not self.conn.is_open:
+            raise MeterCommunicationError('LCR serial connection is not open')
+        try:
+            payload = (command + '\n').encode('ascii')
+            written = self.conn.write(payload)
+            self.conn.flush()
+            if written != len(payload):
+                raise MeterCommunicationError(f'Incomplete write of {command!r}')
+        except serial.SerialException as exc:
+            raise MeterCommunicationError(f'LCR write failed for {command!r}') from exc
+        if delay:
+            time.sleep(delay)
 
     def set_meas_page(self):
-        self.conn.write(b"DISP:PAGE MEAS\n")
-        time.sleep(1)
+        self._send('DISP:PAGE MEAS', 1.0)
 
     def set_function_impedance(self):
-        self.conn.write(b"FUNC Z-thd\n")
-        time.sleep(0.1)
+        self._send('FUNC Z-thd')
 
     def set_bias_voltage(self, v=0):
         self.bias = v
-        self.conn.write(f"BIAS {v}\n".encode())
-        time.sleep(0.1)
+        self._send(f'BIAS {v}')
 
     def set_frequency(self, f=1000):
         self.frequency = f
-        self.conn.write(f"FREQ {f}\n".encode())
-        time.sleep(0.1)
+        self._send(f'FREQ {f}')
 
     def set_stim_voltage(self, v=0.05):
         self.stim = v
-        self.conn.write(f"LEV:VOLT {v}\n".encode())
-        time.sleep(0.1)
+        self._send(f'LEV:VOLT {v}')
 
     def set_average(self, samples):
+        if samples < 1:
+            raise ValueError('average must be >= 1')
         self.average = samples
 
     def set_slow_scan_speed(self):
-        self.conn.write(b"APER SLOW\n")
-        time.sleep(0.1)
+        self._send('APER SLOW')
 
     def set_trigger(self):
-        self.conn.write(b"TRIG:SOUR BUS\n")
-        time.sleep(0.1)
-        self.conn.write(b"TRIG:DLY min\n")
-        time.sleep(0.1)
+        self._send('TRIG:SOUR BUS')
+        self._send('TRIG:DLY min')
 
     def trigger_fetch(self):
-        # Record trigger datetime
-        t_trigger = datetime.now().isoformat(timespec="microseconds")
+        """Issue a single trigger and read exactly one response line.
 
-        # Trigger measurement
-        self.conn.write(b"*TRG\n")
-
-        # Wait for measurement response
-        raw = self.conn.readline()
-
-        # Record arrival datetime
-        t_arrival = datetime.now().isoformat(timespec="microseconds")
-
+        Do not retry automatically: repeating a trigger may duplicate a measurement.
+        A timeout or malformed response is fatal to the current sweep.
+        """
+        self._send('*TRG', delay=0)
+        try:
+            raw = self.conn.readline()
+        except serial.SerialException as exc:
+            raise MeterCommunicationError('Serial read failed after *TRG') from exc
         if not raw:
-            raise TimeoutError("No response from LCR-6200")
+            raise MeterCommunicationError(
+                f'No response to *TRG within {self.conn.timeout} seconds '
+                f'(frequency={getattr(self, "frequency", "unknown")})')
+        if not raw.endswith(b'\n'):
+            raise MeterCommunicationError(f'Unterminated LCR response: {raw!r}')
+        return raw
 
-        return raw, t_trigger, t_arrival
-
-    def decode_fetch(self, data: bytes):
-        mag, phase, _, _, _ = data.decode("utf-8").split(",")
-        print(f"\t{mag}\t{phase}")
-        return float(mag.strip()), float(phase.strip())
+    def decode_fetch(self, raw):
+        try:
+            fields = raw.decode('ascii').strip().split(',')
+            if len(fields) != 5:
+                raise ValueError(f'expected 5 CSV fields, received {len(fields)}')
+            mag, phase = float(fields[0].strip()), float(fields[1].strip())
+            if not np.isfinite(mag) or not np.isfinite(phase):
+                raise ValueError('nonfinite magnitude or phase')
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise MeterCommunicationError(f'Invalid LCR measurement: {raw!r}') from exc
+        print(f'\t{mag}\t{phase}')
+        return mag, phase
 
     def initialize_system(self, level, bias, average):
         self.set_meas_page()
@@ -91,143 +129,62 @@ class Meter:
         self.set_average(average)
         self.set_slow_scan_speed()
         self.set_trigger()
+        LOG.info('Initialized meter: bias=%s, level=%s, average=%s', bias, level, average)
 
-        print(
-            f"Initialized System Vdc={bias}; "
-            f"Vac={level}; Avg={average}."
-        )
+    def _measure_once(self):
+        start = time.monotonic()
+        result = self.decode_fetch(self.trigger_fetch())
+        return result, time.monotonic() - start
 
     def sweep_short_time_avg(self, frequencies, level, bias, average):
         self.initialize_system(level, bias, average)
-
-        time.sleep(5)  # Wait before starting measurements
-
-        results_magnitude = []
-        results_phase = []
-        results_timing = []
-
-        for i, frequency in enumerate(frequencies):
-            results_magnitude.append([])
-            results_phase.append([])
-            results_timing.append([])
-
+        time.sleep(5)
+        mags, phases, timings = [], [], []
+        for frequency in frequencies:
             self.set_frequency(frequency)
-            print(f"Set frequency to {frequency}.")
-       
-            # Trigger twice to reset the value
+            LOG.info('Frequency: %s Hz', frequency)
             for _ in range(2):
                 self.trigger_fetch()
                 time.sleep(0.5)
-
-            # Perform measurements and record timestamps
+            mag_row, phase_row, time_row = [], [], []
             for _ in range(self.average):
-                raw, t_trigger, t_arrival = self.trigger_fetch()
-                mag, phase = self.decode_fetch(raw)
-
-                results_magnitude[i].append(mag)
-                results_phase[i].append(phase)
-                results_timing[i].append([t_trigger, t_arrival])
-
-                # Calculate duration in milliseconds
-                duration_ms = (
-                    datetime.fromisoformat(t_arrival)
-                    - datetime.fromisoformat(t_trigger)
-                ).total_seconds() * 1000
-
-                print(
-                    f"Trigger: {t_trigger} | "
-                    f"Arrival: {t_arrival} | "
-                    f"Duration: {duration_ms:.3f} ms"
-                )
-
+                (mag, phase), elapsed = self._measure_once()
+                mag_row.append(mag)
+                phase_row.append(phase)
+                time_row.append(elapsed)
                 time.sleep(0.05)
-
-        return (
-            np.array(results_magnitude),
-            np.array(results_phase),
-            np.array(results_timing),
-        )
+            mags.append(mag_row)
+            phases.append(phase_row)
+            timings.append(time_row)
+        return np.asarray(mags), np.asarray(phases), np.asarray(timings)
 
     def sweep_long_time_avg(self, frequencies, level, bias, average):
         self.initialize_system(level, bias, average)
-
-        time.sleep(5)  # Wait before starting measurements
-
-        results_magnitude = []
-        results_phase = []
-        results_timing = []
-
-        for i in range(self.average):
-            results_magnitude.append([])
-            results_phase.append([])
-            results_timing.append([])
-
+        time.sleep(5)
+        mags, phases, timings = [], [], []
+        for _ in range(self.average):
+            mag_row, phase_row, time_row = [], [], []
             for frequency in frequencies:
                 self.set_frequency(frequency)
-                print(f"Set frequency to {frequency}.")
-
-                # Trigger twice to reset the value
+                LOG.info('Frequency: %s Hz', frequency)
                 for _ in range(2):
                     self.trigger_fetch()
                     time.sleep(0.1)
-
-                # Measure and record timestamps
-                raw, t_trigger, t_arrival = self.trigger_fetch()
-                mag, phase = self.decode_fetch(raw)
-
-                results_magnitude[i].append(mag)
-                results_phase[i].append(phase)
-                results_timing[i].append([t_trigger, t_arrival])
-
-                # Calculate duration in milliseconds
-                duration_ms = (
-                    datetime.fromisoformat(t_arrival)
-                    - datetime.fromisoformat(t_trigger)
-                ).total_seconds() * 1000
-
-                print(
-                    f"Trigger: {t_trigger} | "
-                    f"Arrival: {t_arrival} | "
-                    f"Duration: {duration_ms:.3f} ms"
-                )
-
+                (mag, phase), elapsed = self._measure_once()
+                mag_row.append(mag)
+                phase_row.append(phase)
+                time_row.append(elapsed)
                 time.sleep(0.05)
+            mags.append(mag_row)
+            phases.append(phase_row)
+            timings.append(time_row)
+        return np.asarray(mags).T, np.asarray(phases).T, np.asarray(timings).T
 
-        # Transpose arrays so dimensions are:
-        # (frequencies, samples)
-        magnitude = np.array(results_magnitude).T
-        phase = np.array(results_phase).T
-
-        # Timing dimensions:
-        # (frequencies, samples, 2)
-        timing = np.transpose(
-            np.array(results_timing),
-            (1, 0, 2)
-        )
-
-        return magnitude, phase, timing
-
-    def sweep_short_time_avg_multi_bias(
-        self, frequencies, level, bias, average
-    ):
-        res_mag = []
-        res_phase = []
-        res_timing = []
-
-        for b in bias:
-            mag, phase, timing = self.sweep_short_time_avg(
-                frequencies, level, b, average
-            )
-
-            res_mag.append(mag)
-            res_phase.append(phase)
-            res_timing.append(timing)
-
-        return res_mag, res_phase, res_timing
-
-    def close(self):
-        if self.conn is not None and self.conn.is_open:
-            self.conn.close()
-
-    def __del__(self):
-        self.close()
+    def sweep_short_time_avg_multi_bias(self, frequencies, level, bias, average):
+        mags, phases, timings = [], [], []
+        for value in bias:
+            mag, phase, timing = self.sweep_short_time_avg(frequencies, level, value, average)
+            mags.append(mag)
+            phases.append(phase)
+            timings.append(timing)
+        return mags, phases, timings
