@@ -356,7 +356,6 @@ if __name__ == "__main__":
                         phase,
                         args.bias,
                         outdir=experiment_dir,
-                        position=position
                     )
 
                     print(
