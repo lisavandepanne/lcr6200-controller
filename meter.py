@@ -4,6 +4,7 @@ IMPORTANT: Assumes the instrument responds to *TRG with a five-field CSV line,
 as in the original implementation. Confirm against the instrument manual.
 """
 import time
+from datetime import datetime, timezone
 import logging
 import serial
 import numpy as np
@@ -132,9 +133,13 @@ class Meter:
         LOG.info('Initialized meter: bias=%s, level=%s, average=%s', bias, level, average)
 
     def _measure_once(self):
-        start = time.monotonic()
-        result = self.decode_fetch(self.trigger_fetch())
-        return result, time.monotonic() - start
+        # Wall-clock timestamps, in ISO 8601 format, for saver.py.
+        # These bracket the trigger/read operation; they are not hardware timestamps.
+        triggered_at = datetime.now(timezone.utc).isoformat()
+        raw = self.trigger_fetch()
+        arrived_at = datetime.now(timezone.utc).isoformat()
+        result = self.decode_fetch(raw)
+        return result, (triggered_at, arrived_at)
 
     def sweep_short_time_avg(self, frequencies, level, bias, average):
         self.initialize_system(level, bias, average)
@@ -148,10 +153,10 @@ class Meter:
                 time.sleep(0.5)
             mag_row, phase_row, time_row = [], [], []
             for _ in range(self.average):
-                (mag, phase), elapsed = self._measure_once()
+                (mag, phase), timestamp_pair = self._measure_once()
                 mag_row.append(mag)
                 phase_row.append(phase)
-                time_row.append(elapsed)
+                time_row.append(timestamp_pair)
                 time.sleep(0.05)
             mags.append(mag_row)
             phases.append(phase_row)
@@ -170,10 +175,10 @@ class Meter:
                 for _ in range(2):
                     self.trigger_fetch()
                     time.sleep(0.1)
-                (mag, phase), elapsed = self._measure_once()
+                (mag, phase), timestamp_pair = self._measure_once()
                 mag_row.append(mag)
                 phase_row.append(phase)
-                time_row.append(elapsed)
+                time_row.append(timestamp_pair)
                 time.sleep(0.05)
             mags.append(mag_row)
             phases.append(phase_row)
