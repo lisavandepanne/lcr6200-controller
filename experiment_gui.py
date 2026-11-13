@@ -6,7 +6,6 @@ Place this file beside main.py, meter.py and saver.py, then run:
 The GUI runs main.py as a subprocess; main.py remains unchanged.
 """
 
-import csv
 import json
 import queue
 import re
@@ -431,18 +430,31 @@ class ExperimentGUI(tk.Tk):
             self.append_log(f"Error: {error}\n")
         if self.experiment_dir and self.experiment_dir.is_dir():
             try:
-                path = self.experiment_dir / "metadata.csv"
-                # Single-row metadata CSV, with experiment start and end timestamps.
-                with path.open("w", newline="", encoding="utf-8-sig") as f:
-                    writer = csv.DictWriter(f, fieldnames=METADATA_FIELDS)
-                    writer.writeheader()
-                    writer.writerow(self.run_metadata)
-                self.append_log(f"Metadata saved: {path}\n")
-            except OSError as exc:
-                self.append_log(f"ERROR saving metadata: {exc}\n")
+                import saver
+
+                csv_files = [
+                    p for p in self.experiment_dir.glob("*.csv")
+                    if p.name != "metadata.csv"
+                ]
+                if len(csv_files) != 1:
+                    raise ValueError(
+                        "Expected exactly one measurement CSV, "
+                        f"found {len(csv_files)}."
+                    )
+
+                measurement_csv = csv_files[0]
+                saver.add_metadata_to_csv(
+                    filepath=measurement_csv,
+                    metadata=self.run_metadata,
+                )
+                self.append_log(f"Combined CSV saved: {measurement_csv}\n")
+            except (OSError, ValueError) as exc:
+                self.append_log(f"ERROR combining metadata: {exc}\n")
                 messagebox.showerror("Metadata save failed", str(exc))
         else:
-            self.append_log("No experiment folder was reported; metadata.csv was not written.\n")
+            self.append_log(
+                "No experiment folder was reported; metadata could not be added.\n"
+            )
         if not successful:
             messagebox.showwarning("Experiment incomplete", "Check the live output for errors. Any created experiment folder has been retained.")
 
