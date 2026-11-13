@@ -183,7 +183,7 @@ class Meter:
             mags.append(mag_row)
             phases.append(phase_row)
             timings.append(time_row)
-        return np.asarray(mags).T, np.asarray(phases).T, np.asarray(timings).T
+        return np.asarray(mags).T, np.asarray(phases).T, np.asarray(timings).transpose(1, 0, 2)
 
     def sweep_short_time_avg_multi_bias(self, frequencies, level, bias, average):
         mags, phases, timings = [], [], []
