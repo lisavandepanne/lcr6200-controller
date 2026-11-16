@@ -52,7 +52,7 @@ def load_experiment(path):
     return Experiment(path, rows, fields)
 
 
-def group_curves(exp, label_col, color_col):
+def group_curves(exp, label_col, color_col, filter_col=None, allowed_values=None):
     """Group by chosen metadata AND measurement dimensions to avoid mixing sweeps."""
     freq_col = find_column(exp.fields, "frequency")
     mag_col = find_column(exp.fields, "magnitude")
@@ -63,6 +63,8 @@ def group_curves(exp, label_col, color_col):
                                     if c and c != "Experiment" and c in exp.fields))
     groups = defaultdict(lambda: defaultdict(lambda: [[], []]))
     for row in exp.rows:
+        if filter_col and allowed_values is not None and row.get(filter_col, "").strip() not in allowed_values:
+            continue
         try:
             f, m, p = (float(row[col]) for col in (freq_col, mag_col, phase_col))
         except (TypeError, ValueError, KeyError):
@@ -98,6 +100,9 @@ class Visualizer(tk.Tk):
         self.selected = {}
         self.label_var = tk.StringVar(value="Experiment")
         self.color_var = tk.StringVar(value="Experiment")
+        self.filter_var = tk.StringVar(value="All rows")
+        self.filter_values = {}
+        self.filter_column_previous = None
         self.std_var = tk.BooleanVar(value=True)
         self.log_mag_var = tk.BooleanVar(value=True)
         self.status = tk.StringVar(value="Open a folder or add CSV files to begin.")
@@ -137,6 +142,28 @@ class Visualizer(tk.Tk):
         self.list_canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
+        filters = ttk.LabelFrame(sidebar, text="Filter CSV rows", padding=8)
+        filters.pack(fill="x", pady=(10, 0))
+        ttk.Label(filters, text="Filter by CSV column").pack(anchor="w")
+        self.filter_combo = ttk.Combobox(filters, textvariable=self.filter_var, state="readonly")
+        self.filter_combo.pack(fill="x", pady=(2, 5))
+        self.filter_combo.bind("<<ComboboxSelected>>", lambda e: self.refresh_filter_values())
+        filter_actions = ttk.Frame(filters)
+        filter_actions.pack(fill="x")
+        ttk.Button(filter_actions, text="Select all values", command=lambda: self.set_filter_values(True)).pack(side="left")
+        ttk.Button(filter_actions, text="Select none", command=lambda: self.set_filter_values(False)).pack(side="left", padx=4)
+        filter_box = ttk.Frame(filters)
+        filter_box.pack(fill="x", pady=(4, 0))
+        self.filter_canvas = tk.Canvas(filter_box, height=118, highlightthickness=0)
+        filter_scroll = ttk.Scrollbar(filter_box, orient="vertical", command=self.filter_canvas.yview)
+        self.filter_frame = ttk.Frame(self.filter_canvas)
+        self.filter_frame.bind("<Configure>", lambda e: self.filter_canvas.configure(scrollregion=self.filter_canvas.bbox("all")))
+        self.filter_window = self.filter_canvas.create_window((0, 0), window=self.filter_frame, anchor="nw")
+        self.filter_canvas.bind("<Configure>", lambda e: self.filter_canvas.itemconfigure(self.filter_window, width=e.width))
+        self.filter_canvas.configure(yscrollcommand=filter_scroll.set)
+        self.filter_canvas.pack(side="left", fill="x", expand=True)
+        filter_scroll.pack(side="right", fill="y")
+
         options = ttk.LabelFrame(sidebar, text="Plot settings", padding=8)
         options.pack(fill="x", pady=(10, 0))
         ttk.Label(options, text="Legend label by CSV column").pack(anchor="w")
@@ -162,7 +189,7 @@ class Visualizer(tk.Tk):
         toolbar.pack(fill="x")
         ttk.Label(self, textvariable=self.status, anchor="w").pack(fill="x", padx=10, pady=(0, 5))
         self.update_columns()
-        self.redraw()
+        self.refresh_filter_values()
 
     def open_files(self):
         paths = filedialog.askopenfilenames(title="Choose experiment CSV files", filetypes=[("CSV", "*.csv")])
@@ -187,7 +214,7 @@ class Visualizer(tk.Tk):
                 errors.append(f"{path.name}: {exc}")
         self.refresh_list()
         self.update_columns()
-        self.redraw()
+        self.refresh_filter_values()
         self.status.set(f"Loaded {count} new CSV(s); {len(self.experiments)} total.")
         if errors:
             messagebox.showwarning("Some files were skipped", "\n".join(errors[:15]))
@@ -201,20 +228,55 @@ class Visualizer(tk.Tk):
             except ValueError:
                 display = path.name
             ttk.Checkbutton(self.list_frame, text=display, variable=self.selected[path],
-                            command=self.redraw).pack(anchor="w", fill="x", pady=2)
+                            command=self.refresh_filter_values).pack(anchor="w", fill="x", pady=2)
 
     def update_columns(self):
         columns = sorted(set().union(*(set(exp.fields) for exp in self.experiments.values()))) if self.experiments else []
         choices = ["Experiment"] + columns
+        self.filter_combo.configure(values=["All rows"] + columns)
+        if self.filter_var.get() not in ["All rows"] + columns:
+            self.filter_var.set("All rows")
         for combo, var in ((self.label_combo, self.label_var), (self.color_combo, self.color_var)):
             combo.configure(values=choices)
             if var.get() not in choices:
                 var.set("Experiment")
 
+    def refresh_filter_values(self):
+        """Show distinct values for the chosen column, across selected CSV files."""
+        column = self.filter_var.get()
+        for child in self.filter_frame.winfo_children():
+            child.destroy()
+        if column == "All rows":
+            self.filter_column_previous = None
+            ttk.Label(self.filter_frame, text="No row filter applied").pack(anchor="w")
+            self.redraw()
+            return
+        values = sorted({row.get(column, "").strip()
+                         for path, exp in self.experiments.items()
+                         if self.selected[path].get() and column in exp.fields
+                         for row in exp.rows}, key=lambda x: (x.casefold(), x))
+        # Preserve checkbox selections when refreshing the same column; newly
+        # encountered values are enabled by default.
+        old = self.filter_values if column == self.filter_column_previous else {}
+        self.filter_values = {v: tk.BooleanVar(value=old[v].get() if v in old else True)
+                              for v in values}
+        self.filter_column_previous = column
+        if not values:
+            ttk.Label(self.filter_frame, text="No values in selected CSVs").pack(anchor="w")
+        for value, var in self.filter_values.items():
+            ttk.Checkbutton(self.filter_frame, text=value if value else "(blank)",
+                            variable=var, command=self.redraw).pack(anchor="w", fill="x")
+        self.redraw()
+
+    def set_filter_values(self, enabled):
+        for var in self.filter_values.values():
+            var.set(enabled)
+        self.redraw()
+
     def set_all(self, value):
         for var in self.selected.values():
             var.set(value)
-        self.redraw()
+        self.refresh_filter_values()
 
     def remove_unchecked(self):
         for path in list(self.experiments):
@@ -223,7 +285,7 @@ class Visualizer(tk.Tk):
                 del self.selected[path]
         self.refresh_list()
         self.update_columns()
-        self.redraw()
+        self.refresh_filter_values()
 
     def reload(self):
         errors = []
@@ -233,7 +295,7 @@ class Visualizer(tk.Tk):
             except (OSError, ValueError, csv.Error) as exc:
                 errors.append(f"{path.name}: {exc}")
         self.update_columns()
-        self.redraw()
+        self.refresh_filter_values()
         if errors:
             messagebox.showwarning("Reload issues", "\n".join(errors[:15]))
 
@@ -241,11 +303,15 @@ class Visualizer(tk.Tk):
         self.ax_mag.clear()
         self.ax_phase.clear()
         label_col, color_col = self.label_var.get(), self.color_var.get()
+        filter_col = self.filter_var.get()
+        allowed = ({v for v, checked in self.filter_values.items() if checked.get()}
+                   if filter_col != "All rows" else None)
         curves = []
         for path, exp in self.experiments.items():
-            if not self.selected[path].get():
+            if not self.selected[path].get() or (filter_col != "All rows" and filter_col not in exp.fields):
                 continue
-            for metadata, freq, mag, mag_std, phase, phase_std in group_curves(exp, label_col, color_col):
+            for metadata, freq, mag, mag_std, phase, phase_std in group_curves(exp, label_col, color_col,
+                                                                 filter_col if filter_col in exp.fields else None, allowed):
                 # The legend and colour category contain ONLY their chosen CSV value.
                 label = path.stem if label_col == "Experiment" else metadata.get(label_col, "(missing)")
                 category = path.stem if color_col == "Experiment" else metadata.get(color_col, "(missing)")
