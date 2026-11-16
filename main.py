@@ -243,7 +243,7 @@ if __name__ == "__main__":
     # ==========================================================
 
     CONTROLLERNAME = "C-863"
-    STAGES = ["M-112.1DG"]
+    STAGE = "M-112.1DG"
     REFMODES = ["FNL"]
 
     # Connect to stage
@@ -262,11 +262,9 @@ if __name__ == "__main__":
 
         print("Initialize connected stages...")
 
-        pitools.startup(
-            stage,
-            stages=STAGES,
-            refmodes=REFMODES
-        )
+
+        stage.CST({"1": STAGE})
+        stage.SVO({"1": 1})
 
         # ======================================================
         # LOOP OVER STAGE POSITIONS
