@@ -243,8 +243,8 @@ if __name__ == "__main__":
     # ==========================================================
 
     CONTROLLERNAME = "C-863"
-    STAGE = "M-112.1DG"
-    REFMODES = ["FNL"]
+    STAGES = ["M-112.1DG"]
+    REFMODES = None
 
     # Connect to stage
     with GCSDevice(CONTROLLERNAME) as stage:
@@ -262,9 +262,11 @@ if __name__ == "__main__":
 
         print("Initialize connected stages...")
 
-
-        stage.CST({"1": STAGE})
-        stage.SVO({"1": 1})
+        pitools.startup(
+            stage,
+            stages=STAGES,
+            refmodes=REFMODES
+        )
 
         # ======================================================
         # LOOP OVER STAGE POSITIONS
