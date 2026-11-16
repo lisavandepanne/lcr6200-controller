@@ -244,7 +244,7 @@ if __name__ == "__main__":
 
     CONTROLLERNAME = "C-863"
     STAGES = ["M-112.1DG"]
-    REFMODES = None
+    REFMODES = ["FNL"]
 
     # Connect to stage
     with GCSDevice(CONTROLLERNAME) as stage:
