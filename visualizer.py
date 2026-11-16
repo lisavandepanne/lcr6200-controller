@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 from collections import defaultdict
 import colorsys
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
@@ -32,6 +33,19 @@ def find_column(fields, kind):
                  if name.casefold() in normalized), None)
 
 
+def normalized_value(column, value):
+    """Normalize position metadata everywhere it is compared or displayed."""
+    value = str(value if value is not None else "").strip()
+    if column.strip().casefold() == "position (mm)" and value:
+        try:
+            number = Decimal(value)
+            if number.is_finite():
+                return str(number.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP))
+        except InvalidOperation:
+            pass
+    return value
+
+
 @dataclass
 class Experiment:
     path: Path
@@ -52,18 +66,18 @@ def load_experiment(path):
     return Experiment(path, rows, fields)
 
 
-def group_curves(exp, label_col, color_col, filter_col=None, allowed_values=None):
+def group_curves(exp, label_cols, color_col, filter_col=None, allowed_values=None):
     """Group by chosen metadata AND measurement dimensions to avoid mixing sweeps."""
     freq_col = find_column(exp.fields, "frequency")
     mag_col = find_column(exp.fields, "magnitude")
     phase_col = find_column(exp.fields, "phase")
     # Bias and position distinguish physical sweeps even if neither is selected.
     dimension_cols = [c for c in ("Bias (V)", "Position (mm)") if c in exp.fields]
-    group_cols = list(dict.fromkeys(c for c in (label_col, color_col, *dimension_cols)
+    group_cols = list(dict.fromkeys(c for c in (*label_cols, color_col, *dimension_cols)
                                     if c and c != "Experiment" and c in exp.fields))
     groups = defaultdict(lambda: defaultdict(lambda: [[], []]))
     for row in exp.rows:
-        if filter_col and allowed_values is not None and row.get(filter_col, "").strip() not in allowed_values:
+        if filter_col and allowed_values is not None and normalized_value(filter_col, row.get(filter_col, "")) not in allowed_values:
             continue
         try:
             f, m, p = (float(row[col]) for col in (freq_col, mag_col, phase_col))
@@ -71,7 +85,7 @@ def group_curves(exp, label_col, color_col, filter_col=None, allowed_values=None
             continue
         if not np.isfinite([f, m, p]).all() or f <= 0:
             continue
-        key = tuple((col, row.get(col, "").strip()) for col in group_cols)
+        key = tuple((col, normalized_value(col, row.get(col, ""))) for col in group_cols)
         groups[key][f][0].append(m)
         groups[key][f][1].append(p)
     result = []
@@ -98,7 +112,7 @@ class Visualizer(tk.Tk):
         self.minsize(900, 550)
         self.experiments = {}
         self.selected = {}
-        self.label_var = tk.StringVar(value="Experiment")
+        self.label_selections = {"Experiment": tk.BooleanVar(value=True)}
         self.color_var = tk.StringVar(value="Experiment")
         self.filter_var = tk.StringVar(value="All rows")
         self.filter_values = {}
@@ -166,13 +180,21 @@ class Visualizer(tk.Tk):
 
         options = ttk.LabelFrame(sidebar, text="Plot settings", padding=8)
         options.pack(fill="x", pady=(10, 0))
-        ttk.Label(options, text="Legend label by CSV column").pack(anchor="w")
-        self.label_combo = ttk.Combobox(options, textvariable=self.label_var, state="readonly")
-        self.label_combo.pack(fill="x", pady=(2, 8))
+        ttk.Label(options, text="Legend columns (select one or more)").pack(anchor="w")
+        legend_box = ttk.Frame(options)
+        legend_box.pack(fill="x", pady=(2, 8))
+        self.legend_canvas = tk.Canvas(legend_box, height=112, highlightthickness=0)
+        legend_scroll = ttk.Scrollbar(legend_box, orient="vertical", command=self.legend_canvas.yview)
+        self.legend_frame = ttk.Frame(self.legend_canvas)
+        self.legend_frame.bind("<Configure>", lambda e: self.legend_canvas.configure(scrollregion=self.legend_canvas.bbox("all")))
+        legend_window = self.legend_canvas.create_window((0, 0), window=self.legend_frame, anchor="nw")
+        self.legend_canvas.bind("<Configure>", lambda e: self.legend_canvas.itemconfigure(legend_window, width=e.width))
+        self.legend_canvas.configure(yscrollcommand=legend_scroll.set)
+        self.legend_canvas.pack(side="left", fill="x", expand=True)
+        legend_scroll.pack(side="right", fill="y")
         ttk.Label(options, text="Colour code by CSV column").pack(anchor="w")
         self.color_combo = ttk.Combobox(options, textvariable=self.color_var, state="readonly")
         self.color_combo.pack(fill="x", pady=(2, 8))
-        self.label_combo.bind("<<ComboboxSelected>>", lambda e: self.redraw())
         self.color_combo.bind("<<ComboboxSelected>>", lambda e: self.redraw())
         ttk.Checkbutton(options, text="Show ±1 standard deviation", variable=self.std_var,
                         command=self.redraw).pack(anchor="w", pady=(4, 0))
@@ -236,10 +258,19 @@ class Visualizer(tk.Tk):
         self.filter_combo.configure(values=["All rows"] + columns)
         if self.filter_var.get() not in ["All rows"] + columns:
             self.filter_var.set("All rows")
-        for combo, var in ((self.label_combo, self.label_var), (self.color_combo, self.color_var)):
-            combo.configure(values=choices)
-            if var.get() not in choices:
-                var.set("Experiment")
+        self.color_combo.configure(values=choices)
+        if self.color_var.get() not in choices:
+            self.color_var.set("Experiment")
+        previous = self.label_selections
+        self.label_selections = {
+            column: previous[column] if column in previous else tk.BooleanVar(value=False)
+            for column in choices
+        }
+        for child in self.legend_frame.winfo_children():
+            child.destroy()
+        for column, variable in self.label_selections.items():
+            ttk.Checkbutton(self.legend_frame, text=column, variable=variable,
+                            command=self.redraw).pack(anchor="w", fill="x")
 
     def refresh_filter_values(self):
         """Show distinct values for the chosen column, across selected CSV files."""
@@ -251,7 +282,7 @@ class Visualizer(tk.Tk):
             ttk.Label(self.filter_frame, text="No row filter applied").pack(anchor="w")
             self.redraw()
             return
-        values = sorted({row.get(column, "").strip()
+        values = sorted({normalized_value(column, row.get(column, ""))
                          for path, exp in self.experiments.items()
                          if self.selected[path].get() and column in exp.fields
                          for row in exp.rows}, key=lambda x: (x.casefold(), x))
@@ -302,7 +333,8 @@ class Visualizer(tk.Tk):
     def redraw(self):
         self.ax_mag.clear()
         self.ax_phase.clear()
-        label_col, color_col = self.label_var.get(), self.color_var.get()
+        label_cols = [c for c, enabled in self.label_selections.items() if enabled.get()]
+        color_col = self.color_var.get()
         filter_col = self.filter_var.get()
         allowed = ({v for v, checked in self.filter_values.items() if checked.get()}
                    if filter_col != "All rows" else None)
@@ -310,10 +342,12 @@ class Visualizer(tk.Tk):
         for path, exp in self.experiments.items():
             if not self.selected[path].get() or (filter_col != "All rows" and filter_col not in exp.fields):
                 continue
-            for metadata, freq, mag, mag_std, phase, phase_std in group_curves(exp, label_col, color_col,
+            for metadata, freq, mag, mag_std, phase, phase_std in group_curves(exp, label_cols, color_col,
                                                                  filter_col if filter_col in exp.fields else None, allowed):
                 # The legend and colour category contain ONLY their chosen CSV value.
-                label = path.stem if label_col == "Experiment" else metadata.get(label_col, "(missing)")
+                label_parts = [path.stem if col == "Experiment" else metadata.get(col, "(missing)")
+                               for col in label_cols]
+                label = " | ".join(label_parts) if label_parts else ""
                 category = path.stem if color_col == "Experiment" else metadata.get(color_col, "(missing)")
                 curves.append((str(category), str(label), freq, mag, mag_std, phase, phase_std))
 
@@ -346,8 +380,9 @@ class Visualizer(tk.Tk):
                 color = colorsys.hls_to_rgb(h, target_lightness, max(0.45, s))
 
             # Duplicate legend labels appear once, exactly as written in the CSV.
-            legend_label = label if label not in used_labels else "_nolegend_"
-            used_labels.add(label)
+            legend_label = label if label and label not in used_labels else "_nolegend_"
+            if label:
+                used_labels.add(label)
             self.ax_mag.plot(freq, mag, color=color, lw=1.7, marker=".", ms=3, label=legend_label)
             self.ax_phase.plot(freq, phase, color=color, lw=1.7, marker=".", ms=3, label=legend_label)
             if self.std_var.get():
@@ -365,7 +400,7 @@ class Visualizer(tk.Tk):
         self.ax_phase.set_ylabel("Phase (degrees)")
         for legend in list(self.figure.legends):
             legend.remove()
-        if curves:
+        if curves and used_labels:
             # One shared legend, leaving space beneath both panels.
             handles, labels = self.ax_mag.get_legend_handles_labels()
             self.figure.legend(handles, labels, loc="outside lower center", ncol=min(4, max(1, len(labels))), fontsize=8)
