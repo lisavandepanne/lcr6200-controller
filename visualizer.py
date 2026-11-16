@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 from collections import defaultdict
+import colorsys
 from dataclasses import dataclass
 from pathlib import Path
 import tkinter as tk
@@ -245,19 +246,40 @@ class Visualizer(tk.Tk):
             if not self.selected[path].get():
                 continue
             for metadata, freq, mag, mag_std, phase, phase_std in group_curves(exp, label_col, color_col):
-                label_value = path.stem if label_col == "Experiment" else metadata.get(label_col, "(missing)")
-                color_value = path.stem if color_col == "Experiment" else metadata.get(color_col, "(missing)")
-                extras = [f"{c}={metadata[c]}" for c in ("Bias (V)", "Position (mm)")
-                          if c in metadata and c != label_col]
-                label = f"{label_value}" + (f" ({', '.join(extras)})" if extras else "")
-                curves.append((str(color_value), str(label), freq, mag, mag_std, phase, phase_std))
+                # The legend and colour category contain ONLY their chosen CSV value.
+                label = path.stem if label_col == "Experiment" else metadata.get(label_col, "(missing)")
+                category = path.stem if color_col == "Experiment" else metadata.get(color_col, "(missing)")
+                curves.append((str(category), str(label), freq, mag, mag_std, phase, phase_std))
+
         categories = sorted({curve[0] for curve in curves})
-        palette = colormaps["tab20"] if len(categories) <= 20 else colormaps["hsv"]
-        colors = {category: palette(i / max(1, len(categories) - 1)) for i, category in enumerate(categories)}
+        # One distinct base hue per category. Repeated curves in a category get
+        # lighter/darker shades of that same hue, without changing their labels.
+        palette = colormaps["tab20"]
+        base_colors = {
+            category: palette((i % 10) * 2 / 20) if len(categories) <= 10
+            else colormaps["hsv"](i / max(1, len(categories)))
+            for i, category in enumerate(categories)
+        }
+        category_counts = defaultdict(int)
+        for category, *_ in curves:
+            category_counts[category] += 1
+        category_seen = defaultdict(int)
         used_labels = set()
         for category, label, freq, mag, mag_std, phase, phase_std in curves:
-            color = colors[category]
-            # Distinguish curves sharing a label by experiment if needed.
+            base = base_colors[category]
+            index = category_seen[category]
+            category_seen[category] += 1
+            count = category_counts[category]
+            if count == 1:
+                color = base
+            else:
+                # Preserve hue; distribute shades across lightness and saturation.
+                h, l, s = colorsys.rgb_to_hls(*base[:3])
+                fraction = index / (count - 1)
+                target_lightness = 0.28 + 0.48 * fraction
+                color = colorsys.hls_to_rgb(h, target_lightness, max(0.45, s))
+
+            # Duplicate legend labels appear once, exactly as written in the CSV.
             legend_label = label if label not in used_labels else "_nolegend_"
             used_labels.add(label)
             self.ax_mag.plot(freq, mag, color=color, lw=1.7, marker=".", ms=3, label=legend_label)
